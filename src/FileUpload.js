@@ -24,7 +24,7 @@ function FileUpload() {
         }
 
         try {
-            const response = await fetch('https://shivamurthy07.pythonanywhere.com/upload', {
+            const response = await fetch('https://shivamurthy07.pythonanywhere.com/upload/esi', {
                 method: 'POST',
                 body: formData,
             });
