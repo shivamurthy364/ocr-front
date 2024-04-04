@@ -10,16 +10,16 @@ const features = [
       route: "/fileupload",
     },
     {
-      title: "TDS",
+      title: "PF Challan",
       description:
-        "Use this tool to extract data from your TDS files.",
+        "Use this tool to extract data from your PF files.",
       icon: "fa fa-clock text-blue-500",
-      route: "/tdsfileupload",
+      route: "/pffileupload",
     },
     {
-      title: "PF",
+      title: "TDS",
       description:
-        "Use this tool to extract data from PF.",
+        "Use this tool to extract data from TDS.",
       icon: "fa fa-language text-purple-500",
       route: "/language",
     },
