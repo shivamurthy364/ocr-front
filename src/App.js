@@ -6,7 +6,8 @@ import Header from './components/Header';
 import ToolsList from './Pages/ToolsList';
 import FileUpload from './FileUpload';
 import NotFound from './Pages/NotFound';
-import TdsFileUpload from './TDSfileUpload';
+import PfFileUpload from './PfFileUpload';
+
 
 
 const App = () => {
@@ -18,7 +19,7 @@ const App = () => {
       <Route path='/esi' element={<ESI/>} />
       <Route path='/toolslist' element={<ToolsList />} />
       <Route path='/fileupload' element={<FileUpload/>} />
-      <Route path='/tdsfileupload' element={< TdsFileUpload/>} />
+      <Route path='/pffileupload' element={<PfFileUpload/>} />
       <Route path='*' element={<NotFound/>} />
     </Routes>
   </Router>

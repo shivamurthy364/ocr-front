@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-function TdsFileUpload() {
+function PfFileUpload() {
     const [selectedFiles, setSelectedFiles] = useState(null);
     const [excelDownloadLink, setExcelDownloadLink] = useState('');
     const [filesUploaded, setFilesUploaded] = useState(false);
@@ -88,4 +88,4 @@ function TdsFileUpload() {
         </div>
     );
 }
-export default TdsFileUpload;
+export default PfFileUpload;
