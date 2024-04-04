@@ -14,7 +14,7 @@ const features = [
       description:
         "Use this tool to extract data from your TDS files.",
       icon: "fa fa-clock text-blue-500",
-      route: "/processing",
+      route: "/tdsfileupload",
     },
     {
       title: "PF",
