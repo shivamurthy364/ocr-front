@@ -1,70 +1,126 @@
-# Getting Started with Create React App
+from flask import Flask, request, send_file, jsonify
+from werkzeug.utils import secure_filename
+import os
+import re
+import pandas as pd
+import pdfplumber
+from nanonets import NANONETSOCR
+import fitz
+import tempfile
+from flask_cors import CORS, cross_origin
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+app = Flask(__name__)
+CORS(app)
+app.config['UPLOAD_FOLDER'] = tempfile.gettempdir()
 
-## Available Scripts
+api_token = '2ee5a8fa-9808-11ee-a8fa-d6d5eaa3d980'
+model = NANONETSOCR()
+model.set_token(api_token)
 
-In the project directory, you can run:
+keys_of_interest_pf = [
+    "TRRN No :", "Challan Status :", "Challan Generated On :", "Establishment ID :",
+    "Establishment Name :", "Challan Type :", "Total Members :", "Wage Month :",
+    "Total Amount (Rs) :", "Account-1 Amount (Rs) :", "Account-2 Amount (Rs) :",
+    "Account-10 Amount (Rs) :", "Account-21 Amount (Rs) :", "Account-22 Amount (Rs) :",
+    "Payment Confirmation Bank :", "CRN :", "Payment Date :", "Payment Confirmation Date :",
+    "Total PMRPY Benefit :"
+]
 
-### `npm start`
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    if pdf_path.endswith('.pdf'):
+        with pdfplumber.open(pdf_path) as doc:
+            for page in doc.pages:
+                text += page.extract_text()
+    elif pdf_path.endswith('.pdf'):
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                text += page.get_text()
+    return text
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+def extract_data_esi(text):
+    data = {
+        "Transaction Status": re.search(r"Transaction\s+status\s*[:\-]?\s*(.+)", text, re.IGNORECASE),
+        "Employer's Code No": re.search(r"Employer's\s+Code\s+No\s*[:\-]?\s*(\d+)", text, re.IGNORECASE),
+        "Employer's Name": re.search(r"Employer's\s+Name\s*[:\-]?\s*(.+)", text, re.IGNORECASE),
+        "Challan Period": re.search(r"Challan\s+Period\s*[:\-]?\s*(.+)", text, re.IGNORECASE),
+        "Challan Number": re.search(r"Challan\s+Number\s*[:\-]?\s*(\d+)", text, re.IGNORECASE),
+        "Challan Created Date": re.search(r"Challan\s+Created\s+Date\s*[:\-]?\s*(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})", text, re.IGNORECASE),
+        "Challan Submitted Date": re.search(r"Challan\s+Submitted\s+Date\s*[:\-]?\s*(\d{2}-\d{2}-\d{4} \d{2}:\d{2}:\d{2})", text, re.IGNORECASE),
+        "Amount Paid": re.search(r"Amount\s+Paid\s*[:\-]?\s*(.+)", text, re.IGNORECASE),
+        "Transaction Number": re.search(r"Transaction\s+Number\s*[:\-]?\s*(\w+)", text, re.IGNORECASE)
+    }
+    for key in data:
+        if data[key]:
+            data[key] = data[key].group(1).strip()
+        else:
+            data[key] = None
+    return data
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+def write_data_to_excel(data, filename='extracted_data.xlsx'):
+    df = pd.DataFrame(data)
+    temp_excel_file = os.path.join(tempfile.gettempdir(), filename)
+    df.to_excel(temp_excel_file, index=False)
+    return temp_excel_file
 
-### `npm test`
+@app.route('/upload/esi', methods=['POST'])
+def upload_file_esi():
+    uploaded_files = request.files.getlist("file")
+    if not uploaded_files:
+        return jsonify({"error": "No files uploaded"}), 400
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+    all_extracted_data = []
+    for file in uploaded_files:
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+        file.save(file_path)
+        text = extract_text_from_pdf(file_path)
+        if len(text) < 50:
+            text = model.convert_to_string(file_path, formatting='lines')
+        extracted_data = extract_data_esi(text)
+        all_extracted_data.append(extracted_data)
 
-### `npm run build`
+    excel_file_path = write_data_to_excel(all_extracted_data, filename='esi_data.xlsx')
+    for file in uploaded_files:
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], secure_filename(file.filename))
+        os.remove(file_path)
+    return send_file(excel_file_path, as_attachment=True)
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+@app.route('/upload/pfchallan', methods=['POST'])
+def upload_and_process_files_pf():
+    files = request.files.getlist('file')
+    if not files:
+        return jsonify({'error': 'No files uploaded'}), 400
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+    all_data = pd.DataFrame()
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+    for file in files:
+        if file and file.filename.endswith('.pdf'):
+            filename = secure_filename(file.filename)
+            pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            file.save(pdf_path)
 
-### `npm run eject`
+            with tempfile.NamedTemporaryFile(mode='w+', suffix='.csv', delete=False) as temp_file:
+                output_filename = temp_file.name
+                model.convert_to_csv(pdf_path, output_file_name=output_filename)
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+                df = pd.read_csv(output_filename)
+                filtered_data = df[df['Unnamed: 0'].isin(keys_of_interest_pf)]
+                clean_data = pd.DataFrame(filtered_data['Unnamed: 1'].values, index=filtered_data['Unnamed: 0']).transpose()
+                clean_data.columns = [col.strip(':') for col in clean_data.columns]
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+                all_data = pd.concat([all_data, clean_data], ignore_index=True)
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+            os.remove(output_filename)
+            os.remove(pdf_path)
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+    if not all_data.empty:
+        consolidated_excel_filename = os.path.join(tempfile.gettempdir(), 'consolidated_pf_data.xlsx')
+        all_data.to_excel(consolidated_excel_filename, index=False)
+        return send_file(consolidated_excel_filename, as_attachment=True)
+    else:
+        return jsonify({'error': 'No data processed'}), 404
 
-## Learn More
-
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
-
-To learn React, check out the [React documentation](https://reactjs.org/).
-
-### Code Splitting
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
-
-### Analyzing the Bundle Size
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
-
-### Making a Progressive Web App
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
-
-### Advanced Configuration
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
-
-### Deployment
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+if __name__ == '__main__':
+    app.run(debug=True)
